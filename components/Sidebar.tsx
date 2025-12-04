@@ -50,7 +50,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex flex-col h-full">
           
           <div className="p-5 flex items-center justify-between border-b border-gray-200 dark:border-gray-800">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 font-titan">nukenote</h2>
+            {/* Changed from font-titan to font-varela for clearer look */}
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 font-varela tracking-tight">nukenote</h2>
             <button onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">
               <XIcon className="w-5 h-5" />
             </button>
@@ -149,7 +150,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           <div className="p-5 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
             <div className="flex flex-col gap-1">
-                 <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 font-titan tracking-wider">NUKENOTE</h2>
+                 {/* Replaced font-titan with font-varela for cleaner look */}
+                 <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 font-varela tracking-wider">NUKENOTE</h2>
             </div>
             <div className="mt-1 text-[10px] text-gray-400">
                 v1.3.0 • Offline Local

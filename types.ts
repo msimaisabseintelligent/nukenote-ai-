@@ -1,3 +1,4 @@
+
 export type BlockType = 'text' | 'image' | 'checklist' | 'code' | 'table';
 export type HandleType = 'top' | 'right' | 'bottom' | 'left';
 export type BlockCategory = 'fitness' | 'study' | 'code' | 'general';
@@ -24,6 +25,7 @@ export interface BlockData {
   content: string | ChecklistItem[] | TableContent; 
   title?: string; // Optional title for blocks
   category?: BlockCategory;
+  contentScale?: number; // Scaling factor for the inner content
 }
 
 export interface Edge {

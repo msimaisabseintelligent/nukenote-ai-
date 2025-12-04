@@ -5,8 +5,9 @@ import { Block } from './components/Block';
 import { Toolbar, ThemeId } from './components/Toolbar';
 import { Intro } from './components/Intro'; 
 import { Sidebar } from './components/Sidebar';
-import { Menu } from './components/Icons';
+import { Menu, Database } from './components/Icons';
 import { generateBlockFromPrompt } from './services/geminiService';
+import { loadWorkspace, saveWorkspace } from './services/storageService';
 
 const INITIAL_ZOOM = 1;
 
@@ -99,6 +100,9 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [preventOverlap, setPreventOverlap] = useState(false);
   
+  // Storage State
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  
   // AI State
   const [aiMode, setAiMode] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -113,23 +117,46 @@ export default function App() {
 
   // -- Initialization & Persistence --
   useEffect(() => {
-    // Load Local Data
-    const savedData = localStorage.getItem('nukenote-data');
-    if (savedData) {
-        try {
-            const parsed = JSON.parse(savedData);
-            setBlocks(parsed.blocks || []);
-            setEdges(parsed.edges || []);
-        } catch (e) {
-            console.error('Failed to load save data', e);
+    // Load Data on Mount
+    const initData = async () => {
+        const data = await loadWorkspace();
+        if (data) {
+            setBlocks(data.blocks);
+            setEdges(data.edges);
         }
-    }
+    };
+    initData();
   }, []);
 
-  // Save to Local
+  // Debounced Auto-Save & Aggressive Save on Close
   useEffect(() => {
-    const saveData = { blocks, edges };
-    localStorage.setItem('nukenote-data', JSON.stringify(saveData));
+    // 1. Debounced save (saves 500ms after user stops typing/moving)
+    setSaveStatus('saving');
+    const timer = setTimeout(async () => {
+        try {
+            await saveWorkspace(blocks, edges);
+            setSaveStatus('saved');
+        } catch (e) {
+            console.error(e);
+            setSaveStatus('error');
+        }
+    }, 500); 
+
+    // 2. Immediate save on tab close, hide, or window quit
+    const handleImmediateSave = () => {
+        saveWorkspace(blocksRef.current, edgesRef.current);
+    };
+    
+    window.addEventListener('beforeunload', handleImmediateSave);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') handleImmediateSave();
+    });
+
+    return () => {
+        clearTimeout(timer);
+        window.removeEventListener('beforeunload', handleImmediateSave);
+        document.removeEventListener('visibilitychange', handleImmediateSave);
+    };
   }, [blocks, edges]);
 
   // -- Actions --
@@ -611,6 +638,17 @@ export default function App() {
     >
       {showIntro && <Intro onComplete={() => setShowIntro(false)} />}
       
+      {/* Save Indicator */}
+      <div className={`fixed top-4 right-4 z-50 px-3 py-1 rounded-full text-xs font-mono transition-all duration-500 border
+         ${saveStatus === 'saved' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-800 opacity-50 hover:opacity-100' : ''}
+         ${saveStatus === 'saving' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 opacity-100' : ''}
+         ${saveStatus === 'error' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 opacity-100' : ''}
+      `}>
+          {saveStatus === 'saved' && 'Saved'}
+          {saveStatus === 'saving' && 'Saving...'}
+          {saveStatus === 'error' && 'Save Error'}
+      </div>
+
       <Sidebar 
           isOpen={isSidebarOpen} 
           onClose={() => setIsSidebarOpen(false)}
@@ -647,7 +685,7 @@ export default function App() {
         onTouchStart={handleCanvasDown}
       >
         <div 
-          className="absolute origin-top-left will-change-transform"
+          className="absolute origin-top-left will-change-transform transition-transform duration-100 ease-out"
           style={{
             transform: `translate(${canvasState.pan.x}px, ${canvasState.pan.y}px) scale(${canvasState.scale})`
           }}

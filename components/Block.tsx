@@ -331,6 +331,7 @@ export const Block: React.FC<BlockProps> = ({
   scale
 }) => {
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const [isResizing, setIsResizing] = useState(false);
 
   useLayoutEffect(() => {
       if (titleRef.current) {
@@ -586,8 +587,10 @@ export const Block: React.FC<BlockProps> = ({
 
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, direction: 'se' | 'sw' | 'ne' | 'nw') => {
     e.stopPropagation();
-    // Don't prevent default on touch, otherwise panning might get weird, but actually we do want to prevent default for resize
     if(e.cancelable) e.preventDefault(); 
+    
+    // Set resizing state to disable transitions
+    setIsResizing(true);
     
     // Unified point extraction
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
@@ -599,6 +602,7 @@ export const Block: React.FC<BlockProps> = ({
     const startH = block.h;
     const startBlockX = block.x;
     const startBlockY = block.y;
+    const startContentScale = block.contentScale || 1;
     const minW = 150;
     const minH = 100;
 
@@ -613,35 +617,66 @@ export const Block: React.FC<BlockProps> = ({
       let newH = startH;
       let newX = startBlockX;
       let newY = startBlockY;
+      let newScale = startContentScale;
 
-      // Vertical resizing
-      if (direction.includes('s')) {
-        newH = Math.max(minH, startH + deltaY);
-      } else if (direction.includes('n')) {
-        let dY = deltaY;
-        if (startH - dY < minH) {
-            dY = startH - minH;
-        }
-        newH = startH - dY;
-        newY = startBlockY + dY;
+      if (direction === 'nw') {
+         // Top-Left (NW): Proportional scaling including content
+         const ratio = startW / startH;
+         
+         // Use X delta to drive scaling for stability
+         // DeltaX > 0 means shrinking width (moving right)
+         const potentialW = startW - deltaX;
+         
+         // Clamp min size
+         if (potentialW >= minW) {
+             newW = potentialW;
+             newH = newW / ratio; // Enforce aspect ratio
+             
+             // Update scale factor relative to the width change
+             newScale = startContentScale * (newW / startW);
+             
+             // Anchor Bottom-Right (Opposite corner)
+             // BR X = startBlockX + startW
+             // New X = BR X - newW
+             newX = (startBlockX + startW) - newW;
+             
+             // BR Y = startBlockY + startH
+             // New Y = BR Y - newH
+             newY = (startBlockY + startH) - newH;
+         }
+
+         onUpdate(block.id, { w: newW, h: newH, x: newX, y: newY, contentScale: newScale });
+
+      } else {
+          // Standard Resizing (Freeform, Anchor Opposite Corner)
+          if (direction.includes('s')) {
+            newH = Math.max(minH, startH + deltaY);
+          } else if (direction.includes('n')) {
+            let dY = deltaY;
+            if (startH - dY < minH) {
+                dY = startH - minH;
+            }
+            newH = startH - dY;
+            newY = startBlockY + dY;
+          }
+
+          if (direction.includes('e')) {
+            newW = Math.max(minW, startW + deltaX);
+          } else if (direction.includes('w')) {
+            let dX = deltaX;
+            if (startW - dX < minW) {
+                dX = startW - minW;
+            }
+            newW = startW - dX;
+            newX = startBlockX + dX;
+          }
+          
+          onUpdate(block.id, { w: newW, h: newH, x: newX, y: newY });
       }
-
-      // Horizontal resizing
-      if (direction.includes('e')) {
-        newW = Math.max(minW, startW + deltaX);
-      } else if (direction.includes('w')) {
-        let dX = deltaX;
-        if (startW - dX < minW) {
-             dX = startW - minW;
-        }
-        newW = startW - dX;
-        newX = startBlockX + dX;
-      }
-
-      onUpdate(block.id, { w: newW, h: newH, x: newX, y: newY });
     };
 
     const onEnd = () => {
+      setIsResizing(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onEnd);
       document.removeEventListener('touchmove', onMove);
@@ -656,18 +691,22 @@ export const Block: React.FC<BlockProps> = ({
 
   const handleTypes: HandleType[] = ['top', 'right', 'bottom', 'left'];
 
+  // Apply scaling wrapper if contentScale is present
+  const contentScale = block.contentScale || 1;
+  const invScale = 100 / contentScale;
+
   return (
     <div
-      className={`absolute transition-shadow duration-300 group flex flex-col
+      className={`absolute flex flex-col group
         ${isSelected ? 'z-50 ring-2 ring-primary-500 shadow-xl shadow-primary-500/20' : 'z-10 shadow-lg shadow-gray-400/20 dark:shadow-black/40 hover:shadow-xl hover:shadow-gray-400/30'}
         bg-white/95 dark:bg-gray-800/95 rounded-xl backdrop-blur-md 
         border border-gray-300 dark:border-gray-700
+        ${isResizing ? 'transition-none' : 'transition-shadow duration-300'} 
       `}
       style={{
         transform: `translate(${block.x}px, ${block.y}px)`,
         width: block.w,
         height: block.h,
-        // Permanent glow/stroke effect requested
         boxShadow: isSelected 
             ? '0 0 0 2px rgba(139, 92, 246, 1), 0 10px 33px -5px rgba(139, 92, 246, 0.45)' 
             : undefined
@@ -697,45 +736,59 @@ export const Block: React.FC<BlockProps> = ({
         />
       ))}
 
-      {/* Header / Drag Handle */}
-      <div
-        className="h-10 flex items-center justify-between px-3 border-b border-gray-200 dark:border-gray-700/50 cursor-grab active:cursor-grabbing handle bg-gray-50/50 dark:bg-transparent rounded-t-xl"
-        data-drag-handle
+      {/* Header / Drag Handle - Always stays same size visually? No, it scales with container if using transform */}
+      {/* However, scaling everything including the header bar makes controls tiny. 
+          Usually "zoom content" means the inner content area. 
+          But "resizing the box including text etc and all the parts inside the box" implies the whole thing.
+          Let's wrap the entire inner structure in the scale div.
+      */}
+      
+      <div 
+        className="w-full h-full flex flex-col origin-top-left"
+        style={{
+            width: `${invScale}%`,
+            height: `${invScale}%`,
+            transform: `scale(${contentScale})`,
+        }}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0 pr-2">
-            <Move className="w-4 h-4 text-gray-400 shrink-0" />
-            {getCategoryIcon()}
-            
-            {/* Editable Title */}
-            <textarea
-                ref={titleRef}
-                value={block.title || ''}
-                onChange={(e) => onUpdate(block.id, { title: e.target.value })}
-                placeholder="Note"
-                rows={1}
-                className="bg-transparent font-semibold text-sm text-gray-700 dark:text-gray-200 outline-none resize-none overflow-hidden w-full placeholder-gray-400/70"
-                style={{ 
-                    minHeight: '20px',
-                    // Approx 2 lines (line-height ~1.25rem * 2)
-                    maxHeight: '44px' 
-                }}
-            />
-        </div>
+          <div
+            className="h-10 flex items-center justify-between px-3 border-b border-gray-200 dark:border-gray-700/50 cursor-grab active:cursor-grabbing handle bg-gray-50/50 dark:bg-transparent rounded-t-xl shrink-0"
+            data-drag-handle
+          >
+            <div className="flex items-center gap-2 flex-1 min-w-0 pr-2">
+                <Move className="w-4 h-4 text-gray-400 shrink-0" />
+                {getCategoryIcon()}
+                
+                {/* Editable Title */}
+                <textarea
+                    ref={titleRef}
+                    value={block.title || ''}
+                    onChange={(e) => onUpdate(block.id, { title: e.target.value })}
+                    placeholder="Note"
+                    rows={1}
+                    className="bg-transparent font-semibold text-sm text-gray-700 dark:text-gray-200 outline-none resize-none overflow-hidden w-full placeholder-gray-400/70"
+                    style={{ 
+                        minHeight: '20px',
+                        maxHeight: '44px' 
+                    }}
+                />
+            </div>
 
-        {/* Action Buttons */}
-        <div className={`flex items-center gap-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-          <button onClick={() => onDuplicate(block.id)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-500">
-             <Copy className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={() => onDelete(block.id)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
-             <Trash className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
+            {/* Action Buttons */}
+            <div className={`flex items-center gap-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+              <button onClick={() => onDuplicate(block.id)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-gray-500">
+                 <Copy className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={() => onDelete(block.id)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
+                 <Trash className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-hidden relative">
-         {renderContent()}
+          {/* Content Area */}
+          <div className="flex-1 overflow-hidden relative">
+             {renderContent()}
+          </div>
       </div>
 
       {/* Resize Handles - 4 Corners */}
@@ -744,13 +797,16 @@ export const Block: React.FC<BlockProps> = ({
             <div className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize z-20 touch-none" onMouseDown={(e) => handleResizeStart(e, 'se')} onTouchStart={(e) => handleResizeStart(e, 'se')} />
             <div className="absolute bottom-0 left-0 w-6 h-6 cursor-nesw-resize z-20 touch-none" onMouseDown={(e) => handleResizeStart(e, 'sw')} onTouchStart={(e) => handleResizeStart(e, 'sw')} />
             <div className="absolute top-0 right-0 w-6 h-6 cursor-nesw-resize z-20 touch-none" onMouseDown={(e) => handleResizeStart(e, 'ne')} onTouchStart={(e) => handleResizeStart(e, 'ne')} />
-            <div className="absolute top-0 left-0 w-6 h-6 cursor-nwse-resize z-20 touch-none" onMouseDown={(e) => handleResizeStart(e, 'nw')} onTouchStart={(e) => handleResizeStart(e, 'nw')} />
+            {/* NW Handle - Special Proportional & Content Scale Icon Indicator */}
+            <div className="absolute top-0 left-0 w-6 h-6 cursor-nwse-resize z-20 touch-none flex items-center justify-center group/nw" onMouseDown={(e) => handleResizeStart(e, 'nw')} onTouchStart={(e) => handleResizeStart(e, 'nw')}>
+                 <div className="w-full h-full absolute inset-0 bg-transparent" /> 
+            </div>
             
-            {/* Improved Visual Indicators for resize handles */}
+            {/* Visual Indicators */}
             <div className="absolute bottom-1 right-1 w-2.5 h-2.5 bg-primary-500 rounded-full pointer-events-none shadow-sm" />
             <div className="absolute bottom-1 left-1 w-2 h-2 border-2 border-primary-400/50 rounded-full pointer-events-none" />
             <div className="absolute top-1 right-1 w-2 h-2 border-2 border-primary-400/50 rounded-full pointer-events-none" />
-            <div className="absolute top-1 left-1 w-2 h-2 border-2 border-primary-400/50 rounded-full pointer-events-none" />
+            <div className="absolute top-1 left-1 w-2.5 h-2.5 bg-primary-400 rounded-full pointer-events-none shadow-sm" title="Scale Content" />
         </>
       )}
     </div>

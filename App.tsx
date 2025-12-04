@@ -5,7 +5,7 @@ import { Block } from './components/Block';
 import { Toolbar, ThemeId } from './components/Toolbar';
 import { Intro } from './components/Intro'; 
 import { Sidebar } from './components/Sidebar';
-import { Menu, Database } from './components/Icons';
+import { Menu } from './components/Icons';
 import { generateBlockFromPrompt } from './services/geminiService';
 import { loadWorkspace, saveWorkspace } from './services/storageService';
 

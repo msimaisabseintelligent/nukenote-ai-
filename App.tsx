@@ -5,7 +5,7 @@ import { Block } from './components/Block';
 import { Toolbar, ThemeId } from './components/Toolbar';
 import { Intro } from './components/Intro'; 
 import { Sidebar } from './components/Sidebar';
-import { Menu } from './components/Icons';
+import { Menu, Trash } from './components/Icons';
 import { generateBlockFromPrompt } from './services/geminiService';
 import { loadWorkspace, saveWorkspace, listWorkspaces, deleteWorkspace } from './services/storageService';
 
@@ -233,8 +233,6 @@ export default function App() {
       if (id === workspaceId) {
           setWorkspaceName(newName);
       } else {
-          // We need to load, update name, save back? Or just update name in metadata?
-          // IndexedDB stores the whole object. We have to load-modify-save.
           const data = await loadWorkspace(id);
           if (data) {
               await saveWorkspace(data.id, newName, data.blocks, data.edges);
@@ -246,18 +244,42 @@ export default function App() {
   const handleDeleteWorkspace = async (id: string) => {
       if (!confirm('Are you sure you want to delete this workspace?')) return;
       
-      await deleteWorkspace(id);
-      
-      if (id === workspaceId) {
-          // Deleted current, switch to another or create new
-          const remaining = workspaces.filter(w => w.id !== id);
-          if (remaining.length > 0) {
-              await handleSwitchWorkspace(remaining[0].id);
-          } else {
-              await handleNewWorkspace();
+      try {
+          await deleteWorkspace(id);
+          
+          if (id === workspaceId) {
+              // We deleted the active workspace.
+              // We need to switch to another existing one or create a new one.
+              // Fetch latest list from DB since state might be slightly stale if not refreshed
+              const latestList = await listWorkspaces();
+              const remaining = latestList.filter(w => w.id !== id);
+              
+              if (remaining.length > 0) {
+                  // Switch to the first available
+                  const nextId = remaining[0].id;
+                  const data = await loadWorkspace(nextId);
+                  if (data) {
+                      setWorkspaceId(data.id);
+                      setWorkspaceName(data.name);
+                      setBlocks(data.blocks);
+                      setEdges(data.edges);
+                      setHistory([]);
+                      localStorage.setItem('nukenote-last-workspace-id', data.id);
+                  }
+              } else {
+                  // No others left, create fresh
+                  const newId = uuidv4();
+                  setWorkspaceId(newId);
+                  setWorkspaceName("Untitled Workspace");
+                  setBlocks([]);
+                  setEdges([]);
+                  setHistory([]);
+              }
           }
-      } else {
           await refreshWorkspaceList();
+      } catch (e) {
+          console.error("Failed to delete workspace", e);
+          alert("Error deleting workspace");
       }
   };
 
@@ -776,14 +798,23 @@ export default function App() {
         <Menu className="w-5 h-5" />
       </button>
 
-      {/* Top Center Workspace Title */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-sm w-full px-4 text-center">
-          <input 
-            className="bg-transparent text-center font-bold text-gray-700 dark:text-gray-200 text-lg outline-none w-full placeholder-gray-400/50 hover:bg-black/5 dark:hover:bg-white/5 rounded px-2 py-1 transition-colors"
-            value={workspaceName}
-            onChange={(e) => setWorkspaceName(e.target.value)}
-            placeholder="Untitled Workspace"
-          />
+      {/* Top Center Workspace Title with Delete Button */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-sm w-full px-4 flex items-center justify-center gap-2 pointer-events-auto">
+          <div className="relative group w-full">
+            <input 
+                className="bg-transparent text-center font-bold text-gray-700 dark:text-gray-200 text-lg outline-none w-full placeholder-gray-400/50 hover:bg-black/5 dark:hover:bg-white/5 rounded px-8 py-1 transition-colors"
+                value={workspaceName}
+                onChange={(e) => setWorkspaceName(e.target.value)}
+                placeholder="Untitled Workspace"
+            />
+             <button 
+                onClick={() => handleDeleteWorkspace(workspaceId)}
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all opacity-0 group-hover:opacity-100"
+                title="Delete Workspace"
+            >
+                <Trash className="w-3.5 h-3.5" />
+            </button>
+          </div>
       </div>
 
       <Toolbar 

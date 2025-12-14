@@ -76,7 +76,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClick={onClose}
       />
       
-      <div className={`fixed top-0 left-0 h-full w-72 bg-white dark:bg-gray-900 shadow-2xl z-[70] transform transition-transform duration-300 ease-in-out border-r border-gray-200 dark:border-gray-800 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div 
+        className={`fixed top-0 left-0 h-full w-72 bg-white dark:bg-gray-900 shadow-2xl z-[70] transform transition-transform duration-300 ease-in-out border-r border-gray-200 dark:border-gray-800 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        onWheel={(e) => e.stopPropagation()} // Stop zoom propagation
+      >
         <div className="flex flex-col h-full">
           
           <div className="p-5 flex items-center justify-between border-b border-gray-200 dark:border-gray-800">
@@ -142,7 +145,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 
                                 {editingId !== w.id && (
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={(e) => { e.stopPropagation(); onDeleteWorkspace(w.id); }} className="p-1 hover:text-red-500 text-gray-400">
+                                        <button 
+                                            onClick={(e) => { 
+                                                e.stopPropagation(); 
+                                                e.preventDefault(); 
+                                                onDeleteWorkspace(w.id); 
+                                            }} 
+                                            className="p-1 hover:text-red-500 text-gray-400"
+                                            title="Delete Workspace"
+                                        >
                                             <Trash className="w-3 h-3" />
                                         </button>
                                     </div>

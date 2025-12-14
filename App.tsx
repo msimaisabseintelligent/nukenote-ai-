@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { BlockData, BlockType, Point, CanvasState, Edge, HandleType, BlockCategory } from './types';
+import { BlockData, BlockType, Point, CanvasState, Edge, HandleType, BlockCategory, WorkspaceMetadata } from './types';
 import { Block } from './components/Block';
 import { Toolbar, ThemeId } from './components/Toolbar';
 import { Intro } from './components/Intro'; 
 import { Sidebar } from './components/Sidebar';
 import { Menu } from './components/Icons';
 import { generateBlockFromPrompt } from './services/geminiService';
-import { loadWorkspace, saveWorkspace } from './services/storageService';
+import { loadWorkspace, saveWorkspace, listWorkspaces, deleteWorkspace } from './services/storageService';
 
 const INITIAL_ZOOM = 1;
 
@@ -92,6 +92,12 @@ const getClientPos = (e: React.MouseEvent | React.TouchEvent | MouseEvent | Touc
 export default function App() {
   // -- State --
   const [showIntro, setShowIntro] = useState(true);
+  
+  // Workspace State
+  const [workspaceId, setWorkspaceId] = useState<string>(uuidv4());
+  const [workspaceName, setWorkspaceName] = useState("Untitled Workspace");
+  const [workspaces, setWorkspaces] = useState<WorkspaceMetadata[]>([]);
+  
   const [blocks, setBlocks] = useState<BlockData[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [history, setHistory] = useState<{blocks: BlockData[], edges: Edge[]}[]>([]);
@@ -111,21 +117,46 @@ export default function App() {
   // Refs for high-freq access in event handlers
   const blocksRef = useRef(blocks);
   const edgesRef = useRef(edges);
+  const workspaceIdRef = useRef(workspaceId);
+  const workspaceNameRef = useRef(workspaceName);
   
   useEffect(() => { blocksRef.current = blocks; }, [blocks]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { workspaceIdRef.current = workspaceId; }, [workspaceId]);
+  useEffect(() => { workspaceNameRef.current = workspaceName; }, [workspaceName]);
 
-  // -- Initialization & Persistence --
+  // -- Initialization --
+  const refreshWorkspaceList = async () => {
+      const list = await listWorkspaces();
+      setWorkspaces(list);
+  };
+
   useEffect(() => {
-    // Load Data on Mount
-    const initData = async () => {
-        const data = await loadWorkspace();
-        if (data) {
-            setBlocks(data.blocks);
-            setEdges(data.edges);
+    // Logic: "Every time we open the app it opens up with new workspace"
+    // To handle refresh vs new tab, we can use sessionStorage.
+    // If session is new, start fresh. If refresh, load last.
+    const init = async () => {
+        const isSessionActive = sessionStorage.getItem('nukenote-session-active');
+        const lastId = localStorage.getItem('nukenote-last-workspace-id');
+
+        if (isSessionActive && lastId) {
+            // It's a page refresh, load existing
+            const data = await loadWorkspace(lastId);
+            if (data) {
+                setWorkspaceId(data.id);
+                setWorkspaceName(data.name);
+                setBlocks(data.blocks);
+                setEdges(data.edges);
+            }
+        } else {
+            // New tab or fresh open -> Start New Workspace
+            sessionStorage.setItem('nukenote-session-active', 'true');
+            // We keep the initial default UUID state
+            // But we still need to load the list for the sidebar
         }
+        await refreshWorkspaceList();
     };
-    initData();
+    init();
   }, []);
 
   // Debounced Auto-Save & Aggressive Save on Close
@@ -134,8 +165,10 @@ export default function App() {
     setSaveStatus('saving');
     const timer = setTimeout(async () => {
         try {
-            await saveWorkspace(blocks, edges);
+            await saveWorkspace(workspaceId, workspaceName, blocks, edges);
+            localStorage.setItem('nukenote-last-workspace-id', workspaceId);
             setSaveStatus('saved');
+            refreshWorkspaceList(); // Update sidebar last modified order
         } catch (e) {
             console.error(e);
             setSaveStatus('error');
@@ -144,7 +177,7 @@ export default function App() {
 
     // 2. Immediate save on tab close, hide, or window quit
     const handleImmediateSave = () => {
-        saveWorkspace(blocksRef.current, edgesRef.current);
+        saveWorkspace(workspaceIdRef.current, workspaceNameRef.current, blocksRef.current, edgesRef.current);
     };
     
     window.addEventListener('beforeunload', handleImmediateSave);
@@ -157,15 +190,82 @@ export default function App() {
         window.removeEventListener('beforeunload', handleImmediateSave);
         document.removeEventListener('visibilitychange', handleImmediateSave);
     };
-  }, [blocks, edges]);
+  }, [blocks, edges, workspaceId, workspaceName]);
 
   // -- Actions --
 
+  const handleNewWorkspace = async () => {
+      // Force save current before switching
+      await saveWorkspace(workspaceId, workspaceName, blocks, edges);
+      
+      // Reset
+      const newId = uuidv4();
+      setWorkspaceId(newId);
+      setWorkspaceName("Untitled Workspace");
+      setBlocks([]);
+      setEdges([]);
+      setHistory([]);
+      setCanvasState({ scale: INITIAL_ZOOM, pan: { x: 0, y: 0 } });
+      
+      await refreshWorkspaceList();
+  };
+
+  const handleSwitchWorkspace = async (id: string) => {
+      // Save current first
+      await saveWorkspace(workspaceId, workspaceName, blocks, edges);
+      
+      // Load target
+      const data = await loadWorkspace(id);
+      if (data) {
+          setWorkspaceId(data.id);
+          setWorkspaceName(data.name);
+          setBlocks(data.blocks);
+          setEdges(data.edges);
+          setHistory([]);
+          setCanvasState({ scale: INITIAL_ZOOM, pan: { x: 0, y: 0 } });
+          // Ensure persisted ID updates so refresh stays on this one
+          localStorage.setItem('nukenote-last-workspace-id', data.id);
+      }
+      await refreshWorkspaceList();
+  };
+
+  const handleRenameWorkspace = async (id: string, newName: string) => {
+      if (id === workspaceId) {
+          setWorkspaceName(newName);
+      } else {
+          // We need to load, update name, save back? Or just update name in metadata?
+          // IndexedDB stores the whole object. We have to load-modify-save.
+          const data = await loadWorkspace(id);
+          if (data) {
+              await saveWorkspace(data.id, newName, data.blocks, data.edges);
+              await refreshWorkspaceList();
+          }
+      }
+  };
+  
+  const handleDeleteWorkspace = async (id: string) => {
+      if (!confirm('Are you sure you want to delete this workspace?')) return;
+      
+      await deleteWorkspace(id);
+      
+      if (id === workspaceId) {
+          // Deleted current, switch to another or create new
+          const remaining = workspaces.filter(w => w.id !== id);
+          if (remaining.length > 0) {
+              await handleSwitchWorkspace(remaining[0].id);
+          } else {
+              await handleNewWorkspace();
+          }
+      } else {
+          await refreshWorkspaceList();
+      }
+  };
+
   const handleExport = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ blocks, edges }));
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ blocks, edges, name: workspaceName }));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `nukenote-backup-${new Date().toISOString().slice(0,10)}.json`);
+    downloadAnchorNode.setAttribute("download", `${workspaceName.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0,10)}.json`);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
@@ -178,8 +278,10 @@ export default function App() {
     reader.onload = (event) => {
         try {
             const parsed = JSON.parse(event.target?.result as string);
+            // On import, we can treat it as replacing current content
             if (parsed.blocks) setBlocks(parsed.blocks);
             if (parsed.edges) setEdges(parsed.edges);
+            if (parsed.name) setWorkspaceName(parsed.name);
             setIsSidebarOpen(false);
         } catch (err) {
             alert('Invalid file format');
@@ -659,6 +761,12 @@ export default function App() {
           onClear={handleClear}
           preventOverlap={preventOverlap}
           setPreventOverlap={setPreventOverlap}
+          workspaces={workspaces}
+          currentWorkspaceId={workspaceId}
+          onSwitchWorkspace={handleSwitchWorkspace}
+          onRenameWorkspace={handleRenameWorkspace}
+          onNewWorkspace={handleNewWorkspace}
+          onDeleteWorkspace={handleDeleteWorkspace}
       />
       
       <button 
@@ -667,6 +775,16 @@ export default function App() {
       >
         <Menu className="w-5 h-5" />
       </button>
+
+      {/* Top Center Workspace Title */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-sm w-full px-4 text-center">
+          <input 
+            className="bg-transparent text-center font-bold text-gray-700 dark:text-gray-200 text-lg outline-none w-full placeholder-gray-400/50 hover:bg-black/5 dark:hover:bg-white/5 rounded px-2 py-1 transition-colors"
+            value={workspaceName}
+            onChange={(e) => setWorkspaceName(e.target.value)}
+            placeholder="Untitled Workspace"
+          />
+      </div>
 
       <Toolbar 
         onAddBlock={(type) => addBlock(type, 0, 0)} 

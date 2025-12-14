@@ -56,3 +56,9 @@ export interface CanvasState {
   scale: number;
   pan: Point;
 }
+
+export interface WorkspaceMetadata {
+  id: string;
+  name: string;
+  lastUpdated: number;
+}

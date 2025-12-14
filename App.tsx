@@ -132,15 +132,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Logic: "Every time we open the app it opens up with new workspace"
-    // To handle refresh vs new tab, we can use sessionStorage.
-    // If session is new, start fresh. If refresh, load last.
     const init = async () => {
         const isSessionActive = sessionStorage.getItem('nukenote-session-active');
         const lastId = localStorage.getItem('nukenote-last-workspace-id');
 
         if (isSessionActive && lastId) {
-            // It's a page refresh, load existing
             const data = await loadWorkspace(lastId);
             if (data) {
                 setWorkspaceId(data.id);
@@ -149,10 +145,7 @@ export default function App() {
                 setEdges(data.edges);
             }
         } else {
-            // New tab or fresh open -> Start New Workspace
             sessionStorage.setItem('nukenote-session-active', 'true');
-            // We keep the initial default UUID state
-            // But we still need to load the list for the sidebar
         }
         await refreshWorkspaceList();
     };
@@ -161,21 +154,19 @@ export default function App() {
 
   // Debounced Auto-Save & Aggressive Save on Close
   useEffect(() => {
-    // 1. Debounced save (saves 500ms after user stops typing/moving)
     setSaveStatus('saving');
     const timer = setTimeout(async () => {
         try {
             await saveWorkspace(workspaceId, workspaceName, blocks, edges);
             localStorage.setItem('nukenote-last-workspace-id', workspaceId);
             setSaveStatus('saved');
-            refreshWorkspaceList(); // Update sidebar last modified order
+            refreshWorkspaceList(); 
         } catch (e) {
             console.error(e);
             setSaveStatus('error');
         }
     }, 500); 
 
-    // 2. Immediate save on tab close, hide, or window quit
     const handleImmediateSave = () => {
         saveWorkspace(workspaceIdRef.current, workspaceNameRef.current, blocksRef.current, edgesRef.current);
     };
@@ -195,10 +186,8 @@ export default function App() {
   // -- Actions --
 
   const handleNewWorkspace = async () => {
-      // Force save current before switching
       await saveWorkspace(workspaceId, workspaceName, blocks, edges);
       
-      // Reset
       const newId = uuidv4();
       setWorkspaceId(newId);
       setWorkspaceName("Untitled Workspace");
@@ -211,10 +200,8 @@ export default function App() {
   };
 
   const handleSwitchWorkspace = async (id: string) => {
-      // Save current first
       await saveWorkspace(workspaceId, workspaceName, blocks, edges);
       
-      // Load target
       const data = await loadWorkspace(id);
       if (data) {
           setWorkspaceId(data.id);
@@ -223,7 +210,6 @@ export default function App() {
           setEdges(data.edges);
           setHistory([]);
           setCanvasState({ scale: INITIAL_ZOOM, pan: { x: 0, y: 0 } });
-          // Ensure persisted ID updates so refresh stays on this one
           localStorage.setItem('nukenote-last-workspace-id', data.id);
       }
       await refreshWorkspaceList();
@@ -242,20 +228,26 @@ export default function App() {
   };
   
   const handleDeleteWorkspace = async (id: string) => {
-      if (!confirm('Are you sure you want to delete this workspace?')) return;
+      // Find name for better UX
+      let nameToDelete = "this workspace";
+      if (id === workspaceId) {
+          nameToDelete = workspaceName;
+      } else {
+          const ws = workspaces.find(w => w.id === id);
+          if (ws) nameToDelete = ws.name;
+      }
+
+      if (!window.confirm(`Are you sure you want to delete "${nameToDelete}"? This action cannot be undone.`)) return;
       
       try {
           await deleteWorkspace(id);
           
           if (id === workspaceId) {
-              // We deleted the active workspace.
-              // We need to switch to another existing one or create a new one.
-              // Fetch latest list from DB since state might be slightly stale if not refreshed
+              // Deleted current, switch to another or create new
               const latestList = await listWorkspaces();
               const remaining = latestList.filter(w => w.id !== id);
               
               if (remaining.length > 0) {
-                  // Switch to the first available
                   const nextId = remaining[0].id;
                   const data = await loadWorkspace(nextId);
                   if (data) {
@@ -267,7 +259,6 @@ export default function App() {
                       localStorage.setItem('nukenote-last-workspace-id', data.id);
                   }
               } else {
-                  // No others left, create fresh
                   const newId = uuidv4();
                   setWorkspaceId(newId);
                   setWorkspaceName("Untitled Workspace");
@@ -300,7 +291,6 @@ export default function App() {
     reader.onload = (event) => {
         try {
             const parsed = JSON.parse(event.target?.result as string);
-            // On import, we can treat it as replacing current content
             if (parsed.blocks) setBlocks(parsed.blocks);
             if (parsed.edges) setEdges(parsed.edges);
             if (parsed.name) setWorkspaceName(parsed.name);
@@ -310,7 +300,6 @@ export default function App() {
         }
     };
     reader.readAsText(file);
-    // Reset input
     e.target.value = '';
   };
 
@@ -331,7 +320,6 @@ export default function App() {
   });
 
   const [isPanning, setIsPanning] = useState(false);
-  // Track if mouse moved during down-up cycle to distinguish click vs drag
   const hasMovedRef = useRef(false);
   const lastMousePos = useRef<Point>({ x: 0, y: 0 });
   const startMousePos = useRef<Point>({ x: 0, y: 0 });
@@ -342,12 +330,8 @@ export default function App() {
   // -- Effects --
 
   useEffect(() => {
-    // Reset classes
     document.documentElement.classList.remove('dark', 'theme-lumina-light', 'theme-lumina-dark', 'theme-crimson', 'theme-slate', 'theme-contrast');
-    // Add specific theme class
     document.documentElement.classList.add(`theme-${currentTheme}`);
-
-    // Determine if it counts as 'dark mode' for base Tailwind classes
     const isLight = currentTheme === 'lumina-light';
     if (!isLight) {
         document.documentElement.classList.add('dark');
@@ -370,11 +354,9 @@ export default function App() {
 
   const addBlock = (type: BlockType, xOffset = 0, yOffset = 0) => {
     pushHistory();
-    // If offsets provided (e.g. click), use them relative to viewport, else center
     let x, y;
     
     if (xOffset !== 0 || yOffset !== 0) {
-        // xOffset/yOffset are raw client coords here for click-to-spawn
         x = (xOffset - canvasState.pan.x) / canvasState.scale;
         y = (yOffset - canvasState.pan.y) / canvasState.scale;
     } else {
@@ -808,8 +790,12 @@ export default function App() {
                 placeholder="Untitled Workspace"
             />
              <button 
-                onClick={() => handleDeleteWorkspace(workspaceId)}
-                className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all opacity-0 group-hover:opacity-100"
+                onClick={(e) => { 
+                    e.preventDefault(); 
+                    e.stopPropagation(); 
+                    handleDeleteWorkspace(workspaceId); 
+                }}
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all opacity-0 group-hover:opacity-100 z-20 cursor-pointer"
                 title="Delete Workspace"
             >
                 <Trash className="w-3.5 h-3.5" />

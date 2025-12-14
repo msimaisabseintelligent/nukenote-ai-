@@ -1,6 +1,6 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import { ThemeId } from './Toolbar';
-import { XIcon, Database, Download, Upload, Layout, Layers, Trash, Plus, CheckSquare } from './Icons';
+import { XIcon, Database, Download, Upload, Layout, Layers, Trash, Plus } from './Icons';
 import { WorkspaceMetadata } from '../types';
 
 interface SidebarProps {
@@ -78,7 +78,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       
       <div 
         className={`fixed top-0 left-0 h-full w-72 bg-white dark:bg-gray-900 shadow-2xl z-[70] transform transition-transform duration-300 ease-in-out border-r border-gray-200 dark:border-gray-800 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        onWheel={(e) => e.stopPropagation()} // Stop zoom propagation
+        onWheel={(e) => e.stopPropagation()} 
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
       >
         <div className="flex flex-col h-full">
           
@@ -149,6 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             onClick={(e) => { 
                                                 e.stopPropagation(); 
                                                 e.preventDefault(); 
+                                                // Removed duplicate confirm here, App.tsx handles it.
                                                 onDeleteWorkspace(w.id); 
                                             }} 
                                             className="p-1 hover:text-red-500 text-gray-400"
